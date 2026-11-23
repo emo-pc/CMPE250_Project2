@@ -3,6 +3,7 @@ import java.io.BufferedWriter;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
 
 /**
  * CMPE250 Project 2 - Course Registration System
@@ -18,6 +19,11 @@ import java.io.IOException;
  * Reminder: java.util.ArrayList is the only class you may use from java.util.
  */
 public class Main {
+    static HashTable<Student> students = new HashTable<>(100003);
+    static HashTable<Course> courses = new HashTable<>(10007);
+    static ArrayList<Student> allStudents = new ArrayList<>();
+    static ArrayList<Course> allCourses = new ArrayList<>();
+    static int appCount = 0;
 
     public static void main(String[] args) throws IOException {
         if (args.length < 3) {
@@ -122,48 +128,239 @@ public class Main {
 
     static String addStudent(String id, String name, String surname, String department, String year, String gpa) {
         // TODO
-        return "";
+        if (students.get(id)!=null) {
+            return "Student "+id+" already exists.";
+        }
+        Student student = new Student(id, name, surname, department, year, gpa);
+        students.put(id, student);
+        allStudents.add(student);
+        return "Student "+name+" "+surname+" ("+id+") added.";
     }
 
     static String addCourse(String code, String capacity, String minGpa, String day, String start, String end,
                             String building) {
         // TODO
-        return "";
+        if (courses.get(code)!=null) {
+            return "Course "+code+" already exists.";
+        }
+        Course course=new Course(code,capacity,minGpa,day,start,end,building);
+        courses.put(code, course);
+        allCourses.add(course);
+        return "Course "+code+" added.";
     }
 
     static String apply(String studentId, String courseCode) {
         // TODO
-        return "";
+        Student student = students.get(studentId);
+        Course course = courses.get(courseCode);
+        if (student == null||course == null) {return "ERROR";}
+        if (student.findApplication(courseCode)!=null) {
+            return studentId+" rejected from "+courseCode+": already applied.";
+        }
+        if (student.gpa<course.minGpa){
+            return studentId+" rejected from "+courseCode+": insufficient GPA.";
+        }
+        Course previous=null;
+        Course next=null;
+        for (int i=0;i<student.schedule.size();i++) {
+            Course other=student.schedule.get(i).course;
+            if (other.dayIndex==course.dayIndex) {
+                if (other.startMin<= course.startMin){
+                    previous=other;
+                }
+                else if (next==null) {
+                    next=other;
+                }
+            }
+        }
+        if (previous!=null&&previous.endMin>course.startMin) {
+            return studentId+" rejected from "+courseCode+": time conflict with "+previous.code+".";
+        }
+        if (next!=null&&next.startMin<course.endMin) {
+            return studentId+" rejected from "+courseCode+": time conflict with "+next.code+".";
+        }
+        appCount++;
+        Application app=new Application(student,course,appCount);
+        student.addToSchedule(app);
+        if (course.enrolled.size<course.capacity){
+            app.isEnrolled=true;
+            course.enrolled.add(app);
+            return studentId+" enrolled in "+courseCode+".";
+        }
+        else{
+            Application weakest=course.enrolled.peek();
+            if (app.compare(weakest)){
+                course.enrolled.poll();
+                weakest.isEnrolled=false;
+                course.waiting.add(weakest);
+                app.isEnrolled=true;
+                course.enrolled.add(app);
+                return studentId + " enrolled in " + courseCode + ", " + weakest.student.id + " moved to waiting list.";
+            }
+            else{
+                app.isEnrolled=false;
+                course.waiting.add(app);
+                return studentId + " added to waiting list of " + courseCode + ".";
+            }
+        }
     }
 
     static String drop(String studentId, String courseCode) {
         // TODO
-        return "";
+        Student student = students.get(studentId);
+        Course course = courses.get(courseCode);
+        if (student == null||course == null) {return "ERROR";}
+        Application app=student.findApplication(courseCode);
+        if (app==null) {
+            return studentId + " is not registered or waiting for " + courseCode + ".";
+        }
+        student.removeFromSchedule(app);
+        if (app.isEnrolled==true){
+            app.isEnrolled=false;
+            course.enrolled.remove(app);
+            if (!course.waiting.isEmpty()) {
+                Application strongest = course.waiting.poll();
+                strongest.isEnrolled=true;
+                course.enrolled.add(strongest);
+                return studentId + " dropped " + courseCode + ", " + strongest.student.id + " promoted from waiting list.";
+            }
+            return studentId + " dropped " + courseCode + ".";
+        }
+        course.waiting.remove(app);
+        return studentId + " removed from waiting list of " + courseCode + ".";
     }
 
     static String getRegistrationStatus(String studentId, String courseCode) {
         // TODO
-        return "";
+        Student student = students.get(studentId);
+        Course course = courses.get(courseCode);
+        if (student == null||course == null) {return "ERROR";}
+        Application app=student.findApplication(courseCode);
+        if (app==null) {return studentId+" has no application for "+courseCode+".";}
+        if (app.isEnrolled==true){
+            return studentId+" is enrolled in "+courseCode+".";
+        }
+        return studentId+" is on the waiting list of "+courseCode+".";
     }
 
     static String getStudent(String studentId) {
         // TODO
-        return "";
+        Student student = students.get(studentId);
+        if (student == null) {return "ERROR";}
+        if (student.schedule.isEmpty()){
+            return "Schedule of " + student.id + " (" + student.name + " " + student.surname + "): empty.";
+        }
+        StringBuilder sb=new StringBuilder();
+        sb.append("Schedule of ");
+        sb.append(student.id);
+        sb.append(" ("+student.name+" ");
+        sb.append(student.surname+"):");
+        for (Application app:student.schedule){
+            Course course=app.course;
+            String status;
+            if (app.isEnrolled==true){status="ENROLLED";}
+            else {status="WAITING";}
+            sb.append("\n- ");
+            sb.append(course.code);
+            sb.append(" (").append(course.day+" ");
+            sb.append(course.start+"-"+course.end);
+            sb.append(", "+course.building+"): ");
+            sb.append(status);
+        }
+        return sb.toString();
     }
 
     static String getCourse(String courseCode) {
         // TODO
-        return "";
+        Course course=courses.get(courseCode);
+        if (course == null) {return "ERROR";}
+        StringBuilder sb=new StringBuilder();
+        sb.append("Roster for "+course.code+" ("+course.enrolled.size);
+        sb.append("/"+course.capacity+"):\n");
+        sb.append("Enrolled:");
+        if (course.enrolled.isEmpty()){sb.append(" none");}
+        else {
+            Application[] enr=course.enrolled.getSortedArray();
+            for (int i=0;i<enr.length;i++){
+                Student student=enr[i].student;
+                sb.append(" "+student.id+" ("+enr[i].score+")");
+                if (i!=enr.length-1){
+                    sb.append(",");
+                }
+            }
+        }
+        sb.append("\n");
+        sb.append("Waiting:");
+        if (course.waiting.isEmpty()){sb.append(" none");}
+        else {
+            Application[] wai=course.waiting.getSortedArray();
+            for (int i=0;i<wai.length;i++){
+                Student student=wai[i].student;
+                sb.append(" "+student.id+" ("+wai[i].score+")");
+                if (i!=wai.length-1){
+                    sb.append(",");
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    static <T extends Comparable<T>> void quickSort(ArrayList<T> list, int left, int right) {
+        if (left >= right) return;
+        T pivot = list.get((left + right) / 2);
+        int i = left;
+        int j = right;
+        while (i <= j) {
+            while (list.get(i).compareTo(pivot) < 0) i++;
+            while (pivot.compareTo(list.get(j)) < 0) j--;
+            if (i <= j) {
+                T temp = list.get(i);
+                list.set(i, list.get(j));
+                list.set(j, temp);
+                i++;
+                j--;
+            }
+        }
+        if (left < j) quickSort(list, left, j);
+        if (i < right) quickSort(list, i, right);
     }
 
     static String courseOccupancy() {
-        // TODO
-        return "";
+        if (allCourses.size() > 1) {
+            quickSort(allCourses, 0, allCourses.size() - 1);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Course occupancy:");
+        for (int i = 0; i < allCourses.size(); i++) {
+            Course c = allCourses.get(i);
+            sb.append("\n- ").append(c.code).append(": ")
+              .append(c.enrolled.size).append("/").append(c.capacity)
+              .append(" (waiting: ").append(c.waiting.size).append(")");
+        }
+        return sb.toString();
     }
 
     static String studentRegistration() {
-        // TODO
-        return "";
+        if (allStudents.size() > 1) {
+            quickSort(allStudents, 0, allStudents.size() - 1);
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Student registrations:");
+        for (int i = 0; i < allStudents.size(); i++) {
+            Student s = allStudents.get(i);
+            sb.append("\n- ").append(s.id).append(": ");
+            if (s.schedule.isEmpty()) {
+                sb.append("none");
+            } else {
+                for (int j = 0; j < s.schedule.size(); j++) {
+                    if (j > 0) sb.append(", ");
+                    Application app = s.schedule.get(j);
+                    String status = app.isEnrolled ? "ENROLLED" : "WAITING";
+                    sb.append(app.course.code).append(" (").append(status).append(")");
+                }
+            }
+        }
+        return sb.toString();
     }
 
     static String route(int phase, String nodeA, String nodeB) {
